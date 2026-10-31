@@ -228,15 +228,18 @@
 
         <div style="border-top:1px solid var(--line);padding-top:12px">
           <label style="color:var(--txt);font-weight:700">☁️ Salvar os vídeos no GitHub (para ver de qualquer lugar)</label>
+          <div class="cfg-note" id="ghDestino" style="font-size:12px;margin-bottom:10px"></div>
           <div class="cfg-grid">
             <div>
               <label for="ghToken">Token do GitHub (Personal Access Token)</label>
               <input id="ghToken" type="text" placeholder="github_pat_xxxxxxxxxxxx" autocomplete="off" />
               <div class="cfg-note">
                 Crie em <b>github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)</b>,
-                marcando <b>repo</b>. O token fica salvo só no seu navegador.
-                ⚠️ Se o repositório for <b>público</b>, qualquer pessoa poderá ver os vídeos enviados — use um
-                repositório privado para conteúdo pessoal.
+                marcando <b>repo</b> e validade <b>No expiration</b> (para valer para sempre).
+                Digitado aqui, ele fica salvo neste navegador e você não precisa digitar de novo.
+                <br>⚠️ Como o repositório <b>Video-off</b> é público, <b>não cole o token dentro do arquivo do site</b>:
+                qualquer pessoa que abrisse a página veria o token, e o GitHub revoga tokens publicados em
+                repositórios públicos. Digite aqui — fica só no seu navegador.
               </div>
             </div>
             <div>
@@ -398,6 +401,35 @@
     rawBase: "https://raw.githubusercontent.com"
   };
 
+  /* =====================================================================
+     DESTINO FIXO DOS VÍDEOS
+     Já está apontando para o seu repositório. Se algum dia quiser mudar,
+     é só alterar aqui (ou pelos campos de ⚙️ Configurações do site).
+     ===================================================================== */
+  var DESTINO = {
+    owner: "harahelkrama-droid",
+    repo: "Video-off",
+    branch: "main",
+    folder: "Meus Videos"
+  };
+
+  /* =====================================================================
+     TOKEN "PARA SEMPRE"
+     Cole o seu token aqui DENTRO DAS ASPAS uma única vez e ele passa a
+     valer em qualquer dispositivo que abrir o site — sem precisar digitar
+     de novo. Exemplo:  var TOKEN_PADRAO = "github_pat_xxxx...";
+
+     ⚠️  SÓ FAÇA ISSO SE O REPOSITÓRIO FOR PRIVADO. Se ele for público,
+     qualquer pessoa que abrir a página pode ver o token — e o GitHub
+     detecta e revoga automaticamente tokens publicados em repositórios
+     públicos. Em repositório público, prefira digitar o token uma vez
+     em ⚙️ Configurações: ele fica salvo no seu navegador para sempre.
+     ===================================================================== */
+  var TOKEN_PADRAO = "";
+
+  function tokenEmUso() { return GH.token || TOKEN_PADRAO; }
+  function usandoTokenDoArquivo() { return !GH.token && !!TOKEN_PADRAO; }
+
   function curList() { return activeIsRepo ? repoVideos : videos; }
 
   var $ = function (id) { return document.getElementById(id); };
@@ -468,11 +500,11 @@
         CFG.customProxy = c.customProxy || "";
         CFG.extract = c.extract !== false;
         CFG.mediaProxy = c.mediaProxy !== false;
-        GH.token = c.ghToken || "";
-        GH.owner = c.ghOwner || "";
-        GH.repo = c.ghRepo || "";
-        GH.branch = c.ghBranch || "main";
-        GH.folder = c.ghFolder || "videos_validados";
+        GH.token = (c.ghToken !== undefined && c.ghToken !== null) ? c.ghToken : "";
+        GH.owner = c.ghOwner || DESTINO.owner;
+        GH.repo = c.ghRepo || DESTINO.repo;
+        GH.branch = c.ghBranch || DESTINO.branch;
+        GH.folder = c.ghFolder || DESTINO.folder;
         GH.maxMB = Number(c.ghMax) > 0 ? Number(c.ghMax) : 90;
         GH.apiBase = c.ghApi || "https://api.github.com";
         GH.rawBase = c.ghRaw || "https://raw.githubusercontent.com";
@@ -497,7 +529,7 @@
      Envia o vídeo validado para uma pasta do repositório e mantém um
      index.json lá dentro. Assim qualquer dispositivo que abrir o site
      vê e toca os vídeos (são arquivos estáticos do GitHub Pages).     */
-  function ghReady() { return !!(GH.token && GH.owner && GH.repo && GH.branch); }
+  function ghReady() { return !!(tokenEmUso() && GH.owner && GH.repo && GH.branch); }
 
   function ghSegments(file) {
     var segs = [GH.folder || "videos_validados"];
@@ -517,7 +549,7 @@
   function ghApi(path, options) {
     var base = (GH.apiBase || "https://api.github.com").replace(/\/+$/, "");
     var headers = { "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
-    if (GH.token) headers["Authorization"] = "Bearer " + GH.token;
+    if (tokenEmUso()) headers["Authorization"] = "Bearer " + tokenEmUso();
     if (options && options.body) headers["Content-Type"] = "application/json";
     return fetch(base + path, {
       method: (options && options.method) || "GET",
@@ -1679,7 +1711,17 @@
     area.appendChild(ul);
   }
 
+  function mostraDestino() {
+    var el = $("ghDestino");
+    if (!el) return;
+    el.innerHTML = "📍 Destino: <b>" + escapeHtml(GH.owner + "/" + GH.repo) + "</b> → pasta <b>" +
+      escapeHtml(GH.folder) + "</b> (branch <b>" + escapeHtml(GH.branch) + "</b>)" +
+      (usandoTokenDoArquivo() ? " • <span style='color:var(--ok)'>🔒 token fixo do arquivo</span>"
+        : (GH.token ? " • 🔑 token salvo neste navegador" : " • ⚠️ falta o token"));
+  }
+
   function refreshRepo() {
+    mostraDestino();
     if (!ghReady()) { renderRepo(); return; }
     repoStatus("Buscando a lista no repositório...", "");
     ghLoadIndex().then(function (list) {
@@ -1779,8 +1821,15 @@
     repoStatus("Testando conexão com o GitHub...", "");
     ghApi("/repos/" + encodeURIComponent(GH.owner) + "/" + encodeURIComponent(GH.repo), { method: "GET" })
       .then(function (d) {
-        repoStatus("✅ Conectado a " + ((d && d.full_name) || (GH.owner + "/" + GH.repo)) +
-                   ". Os vídeos serão salvos em " + GH.folder + "/.", "ok");
+        var aviso = "✅ Conectado a " + ((d && d.full_name) || (GH.owner + "/" + GH.repo)) +
+                   ". Os vídeos vão para a pasta " + GH.folder + "/.";
+        repoStatus(aviso, "ok");
+        ghApi("/repos/" + encodeURIComponent(GH.owner) + "/" + encodeURIComponent(GH.repo) + "/pages", { method: "GET" })
+          .then(function () {})
+          .catch(function () {
+            repoStatus(aviso + " ⚠️ O GitHub Pages ainda não está ligado nesse repositório " +
+                       "(Settings > Pages > branch main > Save).", "ok");
+          });
       })
       .catch(function (e) {
         repoStatus("❌ Não consegui acessar: " + ((e && e.message) || e) +
@@ -1809,6 +1858,7 @@
   $("cfgExtract").checked = CFG.extract;
   $("cfgMediaProxy").checked = CFG.mediaProxy;
   $("ghToken").value = GH.token;
+  $("ghToken").placeholder = usandoTokenDoArquivo() ? "🔒 token fixo do arquivo em uso" : "github_pat_xxxxxxxxxxxx";
   $("ghOwner").value = GH.owner;
   $("ghRepo").value = GH.repo;
   $("ghBranch").value = GH.branch;
@@ -1818,8 +1868,11 @@
   $("ghRaw").value = GH.rawBase;
   renderList();
   renderRepo();
-  if (ghReady()) refreshRepo(); else repoStatus("Configure o GitHub para salvar os vídeos e assistir de qualquer dispositivo.", "");
+  mostraDestino();
+  if (ghReady()) refreshRepo();
+  else repoStatus(tokenEmUso() ? "Token ok — falta conferir o repositório."
+                               : "Cole o token do GitHub em ⚙️ Configurações para salvar os vídeos e assistir de qualquer dispositivo.", "");
 })();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a536413e1bdb0108',t:'MTc5MzQ4NzQwNQ=='};var l=window.parent.location,o;try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=a536413e1bdb0108',a=document.createElement('script');a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
